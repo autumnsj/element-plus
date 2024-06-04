@@ -135,6 +135,21 @@ function useStyles<T>(props: Partial<TableBodyProps<T>>) {
     }
     return { rowspan, colspan }
   }
+  // const getColspanRealWidth = (
+  //   columns: TableColumnCtx<T>[],
+  //   colspan: number,
+  //   index: number
+  // ): number => {
+  //   if (colspan < 1) {
+  //     return columns[index].realWidth
+  //   }
+  //   const widthArr = columns
+  //     .map(({ realWidth, width }) => realWidth || width)
+  //     .slice(index, index + colspan)
+  //   return Number(
+  //     widthArr.reduce((acc, width) => Number(acc) + Number(width), -1)
+  //   )
+  // }
   const getColspanRealWidth = (
     columns: TableColumnCtx<T>[],
     colspan: number,

@@ -80,11 +80,19 @@ function useRender<T>(props: Partial<TableBodyProps<T>>) {
           return null
         }
         const columnData = Object.assign({}, column)
+        // columnData.realWidth = getColspanRealWidth(
+        //   columns.value,
+        //   colspan,
+        //   cellIndex
+        // )
+        const optimizeColumns = columns.value.map((item) => {
+          return { realWidth: item.realWidth, width: item.width };
+        });
         columnData.realWidth = getColspanRealWidth(
-          columns.value,
+          optimizeColumns, // 传入函数内部时，使用非响应式数据
           colspan,
           cellIndex
-        )
+        );
         const data: RenderRowData<T> = {
           store: props.store,
           _self: props.context || parent,
