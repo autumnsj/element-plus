@@ -403,6 +403,12 @@ interface TreeNode {
     </template>
 </el-table-column>
 ```
+#### table 优化
+::: demo
+
+table/table-nice
+
+:::
 
 PS: since the fixed column is implement by sticky, when you have fixed columns in table, please add the `preview-teleported` attribute in image
 
