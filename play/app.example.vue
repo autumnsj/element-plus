@@ -8,7 +8,7 @@
     <el-icon>
       <el-icon-menu />
     </el-icon>
-    <el-button>test</el-button>
+    <el-button>test1</el-button>
     <div v-loading="true" />
   </div>
   <!-- </el-config-provider> -->
