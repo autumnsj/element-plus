@@ -166,7 +166,14 @@
 
 <script lang="ts">
 // @ts-nocheck
-import { computed, defineComponent, getCurrentInstance, provide } from 'vue'
+import {
+  computed,
+  defineComponent,
+  getCurrentInstance,
+  onMounted,
+  provide,
+  ref,
+} from 'vue'
 import { debounce } from 'lodash-unified'
 import { Mousewheel } from '@element-plus/directives'
 import { useLocale, useNamespace } from '@element-plus/hooks'
@@ -294,9 +301,327 @@ export default defineComponent({
       return props.emptyText || t('el.table.emptyText')
     })
 
+    const extractDisplayText = (vnode: any, depth = 0): string => {
+      if (!vnode) return ''
+
+      // 处理字符串
+      if (typeof vnode === 'string') {
+        return vnode.trim()
+      }
+
+      // 处理文本节点
+      if (vnode.type === Symbol.for('v-txt')) {
+        const text = vnode.children || ''
+        return typeof text === 'string' ? text.trim() : ''
+      }
+
+      // 处理数组
+      if (Array.isArray(vnode)) {
+        return vnode
+          .map((item) => extractDisplayText(item, depth + 1))
+          .filter(Boolean)
+          .join('')
+      }
+
+      // 处理函数
+      if (typeof vnode === 'function') {
+        try {
+          return extractDisplayText(vnode(), depth + 1)
+        } catch {
+          return ''
+        }
+      }
+
+      // 处理对象（包括 VNode）
+      if (typeof vnode === 'object' && vnode !== null) {
+        // 处理 children 为插槽对象且有 default 函数的情况
+        if (
+          vnode.children &&
+          typeof vnode.children === 'object' &&
+          typeof vnode.children.default === 'function'
+        ) {
+          try {
+            return extractDisplayText(vnode.children.default(), depth + 1)
+          } catch {
+            return ''
+          }
+        }
+        // 处理子节点
+        if (vnode.children) {
+          if (typeof vnode.children === 'function') {
+            try {
+              return extractDisplayText(vnode.children(), depth + 1)
+            } catch {
+              return ''
+            }
+          }
+          return extractDisplayText(vnode.children, depth + 1)
+        }
+        // 处理默认插槽
+        if (vnode.props?.default) {
+          return extractDisplayText(vnode.props.default, depth + 1)
+        }
+        // 处理其他属性
+        if ('value' in vnode) return String(vnode.value)
+        if ('label' in vnode) return String(vnode.label)
+        if ('text' in vnode) return String(vnode.text)
+        if ('content' in vnode) return String(vnode.content)
+      }
+      return ''
+    }
+
+    const extractValue = (vnode: any) => {
+      if (!vnode) return ''
+
+      console.log('提取值 - 输入:', vnode)
+
+      // 处理字符串
+      if (typeof vnode === 'string') {
+        return vnode.trim()
+      }
+
+      // 处理函数
+      if (typeof vnode === 'function') {
+        try {
+          return extractDisplayText(vnode())
+        } catch (error) {
+          console.error('执行函数失败:', error)
+          return ''
+        }
+      }
+
+      // 处理数组
+      if (Array.isArray(vnode)) {
+        return vnode
+          .map((item) => extractDisplayText(item))
+          .filter(Boolean)
+          .join('')
+      }
+
+      // 处理对象（包括 VNode）
+      if (typeof vnode === 'object' && vnode !== null) {
+        // 处理子节点
+        if (vnode.children) {
+          if (typeof vnode.children === 'function') {
+            try {
+              return extractDisplayText(vnode.children())
+            } catch (error) {
+              console.error('执行子节点函数失败:', error)
+              return ''
+            }
+          }
+          return extractDisplayText(vnode.children)
+        }
+
+        // 处理默认插槽
+        if (vnode.props?.default) {
+          return extractDisplayText(vnode.props.default)
+        }
+
+        // 处理其他属性
+        if ('value' in vnode) return String(vnode.value)
+        if ('label' in vnode) return String(vnode.label)
+        if ('text' in vnode) return String(vnode.text)
+        if ('content' in vnode) return String(vnode.content)
+      }
+
+      return ''
+    }
+
+    /**
+     * 虚拟渲染数据提取方法
+     * @param data 需要转换的原始数据数组
+     * @returns { data: 渲染后纯文本数据数组, restore: 恢复函数（此实现已无副作用，可为空） }
+     * 说明：本方法不会修改表格的真实数据，也不会触发真实DOM渲染，仅做数据转换，适合大数据量导出。
+     */
+    const getVirtualRenderData = (data: any[]) => {
+      const instance = table
+      const results = new Map()
+      const rowKey = props.rowKey || 'id'
+
+      // 获取行标识
+      const getRowKey = (row: any) => {
+        if (typeof rowKey === 'function') {
+          return rowKey(row)
+        }
+        return row[rowKey]
+      }
+
+      // 保存原始的 renderCell 方法（本实现不再修改 store.states.data.value，不会影响真实渲染）
+      const originalRenderCells = new Map()
+      store.states.columns.value.forEach((column) => {
+        originalRenderCells.set(column.id, column.renderCell)
+        // 虚拟渲染：仅用于提取文本，不做真实渲染
+        column.renderCell = (scope) => {
+          // 获取原始值
+          const rawValue = scope.row[column.property]
+
+          // 获取格式化后的值
+          let formattedValue = rawValue
+          if (column.formatter) {
+            formattedValue = column.formatter(
+              scope.row,
+              column,
+              rawValue,
+              scope.$index
+            )
+          }
+
+          // 获取渲染后的值
+          let renderedValue
+
+          // 获取当前列的插槽
+          const slots = instance.slots
+          if (slots.default) {
+            const slotContent = slots.default()
+            if (Array.isArray(slotContent)) {
+              // 查找与当前列匹配的插槽
+              const columnSlot = slotContent.find((slot: any) => {
+                const slotColumn = slot.props?.column
+                return (
+                  slotColumn?.id === column.id ||
+                  slotColumn?.property === column.property ||
+                  (slotColumn?.type === 'default' &&
+                    slotColumn?.prop === column.property) ||
+                  slot.props?.prop === column.property ||
+                  slot.props?.column?.property === column.property
+                )
+              })
+
+              if (columnSlot?.props?.default) {
+                // 使用当前列的插槽渲染，传递作用域参数
+                const slotScope = {
+                  row: scope.row,
+                  column: scope.column,
+                  $index: scope.$index,
+                  store: instance.store,
+                  _self: instance,
+                }
+                try {
+                  const slotResult = columnSlot.props.default(slotScope)
+                  renderedValue = Array.isArray(slotResult)
+                    ? slotResult[0]
+                    : slotResult
+                } catch {
+                  // 插槽渲染异常，忽略
+                }
+              }
+            }
+          }
+
+          // 如果没有插槽渲染结果，使用原始的 renderCell
+          if (!renderedValue) {
+            const originalRender = originalRenderCells.get(column.id)
+            if (originalRender) {
+              try {
+                renderedValue = originalRender(scope)
+              } catch {
+                // 原始渲染异常，忽略
+              }
+            } else {
+              // 如果没有原始的 renderCell，使用格式化后的值
+              renderedValue = formattedValue
+            }
+          }
+
+          // 提取最终值（纯文本）
+          let finalValue = ''
+          if (renderedValue) {
+            if (typeof renderedValue === 'object') {
+              // 处理 VNode 或普通对象
+              if (renderedValue.__v_isVNode) {
+                finalValue = extractValue(renderedValue)
+              } else {
+                if ('value' in renderedValue) {
+                  finalValue = renderedValue.value
+                } else if ('label' in renderedValue) {
+                  finalValue = renderedValue.label
+                } else if ('text' in renderedValue) {
+                  finalValue = renderedValue.text
+                } else if ('content' in renderedValue) {
+                  finalValue = renderedValue.content
+                } else {
+                  finalValue = extractValue(renderedValue)
+                }
+              }
+            } else {
+              finalValue = String(renderedValue)
+            }
+          }
+
+          const rowKey = getRowKey(scope.row)
+          results.set(`${rowKey}_${column.id}`, finalValue)
+
+          return null // 阻断真实渲染
+        }
+      })
+
+      // 不再修改 store.states.data.value，避免影响真实表格渲染
+      // store.states.data.value = data
+
+      // 手动调用所有列的 renderCell 来收集数据（仅做虚拟转换，不影响页面）
+      store.states.columns.value.forEach((column) => {
+        data.forEach((row) => {
+          const scope = {
+            row,
+            column,
+            $index: data.indexOf(row),
+            store: instance.store,
+            _self: instance,
+          }
+          column.renderCell(scope)
+        })
+      })
+
+      // 恢复原始的 renderCell 方法，防止后续表格渲染异常
+      store.states.columns.value.forEach((column) => {
+        column.renderCell = originalRenderCells.get(column.id)
+      })
+
+      // 处理并返回最终的纯文本数据
+      const processedData = processData(results, data)
+      return {
+        data: processedData,
+        restore: () => {
+          // 已经恢复了原始的 renderCell 方法，这里不需要额外操作
+        },
+      }
+    }
+
+    /**
+     * 处理虚拟渲染结果，组装为最终导出用的纯文本数据数组
+     * @param results Map<string, any> 虚拟渲染收集到的单元格数据
+     * @param data 原始数据数组
+     * @returns 组装后的纯文本数据数组
+     */
+    const processData = (results: Map<string, any>, data: any[]) => {
+      const rowKey = props.rowKey || 'id'
+      const getRowKey = (row: any) => {
+        if (typeof rowKey === 'function') {
+          return rowKey(row)
+        }
+        return row[rowKey]
+      }
+
+      // 遍历原始数据，组装每一行的最终导出数据
+      return data.map((row) => {
+        const rendered = { ...row }
+        store.states.columns.value.forEach((col) => {
+          const key = `${getRowKey(row)}_${col.id}`
+          if (results.has(key)) {
+            rendered[col.property] = results.get(key)
+          }
+        })
+        return rendered
+      })
+    }
+
     useKeyRender(table)
 
     return {
+      getVirtualRenderData,
+      processData,
+      extractValue,
       ns,
       layout,
       store,
