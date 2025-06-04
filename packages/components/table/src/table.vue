@@ -373,7 +373,16 @@ export default defineComponent({
     const extractValue = (vnode: any) => {
       if (!vnode) return ''
 
-      console.log('提取值 - 输入:', vnode)
+      console.log('提取值 - 详细结构:', {
+        type: vnode.type,
+        props: vnode.props,
+        children: vnode.children,
+        isVNode: vnode.__v_isVNode,
+        shapeFlag: vnode.shapeFlag,
+        patchFlag: vnode.patchFlag,
+        component: vnode.component,
+        el: vnode.el,
+      })
 
       // 处理字符串
       if (typeof vnode === 'string') {
@@ -402,6 +411,7 @@ export default defineComponent({
       if (typeof vnode === 'object' && vnode !== null) {
         // 处理子节点
         if (vnode.children) {
+          console.log('处理子节点:', vnode.children)
           if (typeof vnode.children === 'function') {
             try {
               return extractDisplayText(vnode.children())
@@ -415,6 +425,7 @@ export default defineComponent({
 
         // 处理默认插槽
         if (vnode.props?.default) {
+          console.log('处理默认插槽:', vnode.props.default)
           return extractDisplayText(vnode.props.default)
         }
 
@@ -528,20 +539,25 @@ export default defineComponent({
           let finalValue = ''
           if (renderedValue) {
             if (typeof renderedValue === 'object') {
-              // 处理 VNode 或普通对象
-              if (renderedValue.__v_isVNode) {
-                finalValue = extractValue(renderedValue)
+              // 新增图片链接提取逻辑：如果是图片元素，直接获取src属性
+              if (renderedValue.type === 'img' && renderedValue.props) {
+                finalValue = renderedValue.props.src || ''
               } else {
-                if ('value' in renderedValue) {
-                  finalValue = renderedValue.value
-                } else if ('label' in renderedValue) {
-                  finalValue = renderedValue.label
-                } else if ('text' in renderedValue) {
-                  finalValue = renderedValue.text
-                } else if ('content' in renderedValue) {
-                  finalValue = renderedValue.content
-                } else {
+                // 处理 VNode 或普通对象
+                if (renderedValue.__v_isVNode) {
                   finalValue = extractValue(renderedValue)
+                } else {
+                  if ('value' in renderedValue) {
+                    finalValue = renderedValue.value
+                  } else if ('label' in renderedValue) {
+                    finalValue = renderedValue.label
+                  } else if ('text' in renderedValue) {
+                    finalValue = renderedValue.text
+                  } else if ('content' in renderedValue) {
+                    finalValue = renderedValue.content
+                  } else {
+                    finalValue = extractValue(renderedValue)
+                  }
                 }
               }
             } else {
@@ -549,15 +565,26 @@ export default defineComponent({
             }
           }
 
+          // ===== 新增逻辑 =====
+          // 如果提取值为空或空字符串，则使用原始值
+          if (finalValue === '' || finalValue == null) {
+            // 首先尝试使用格式化后的值（如果有）
+            if (formattedValue != null && formattedValue !== '') {
+              finalValue = formattedValue
+            }
+            // 如果格式化值也无效，使用原始数据值
+            else if (rawValue != null && rawValue !== '') {
+              finalValue = rawValue
+            }
+          }
+          // ====================
+
           const rowKey = getRowKey(scope.row)
           results.set(`${rowKey}_${column.id}`, finalValue)
 
           return null // 阻断真实渲染
         }
       })
-
-      // 不再修改 store.states.data.value，避免影响真实表格渲染
-      // store.states.data.value = data
 
       // 手动调用所有列的 renderCell 来收集数据（仅做虚拟转换，不影响页面）
       store.states.columns.value.forEach((column) => {
